@@ -21,12 +21,15 @@ extern string Autor = "Thrinai Chankong";
 extern string Desc1 = "If you want to donate me";
 extern string Desc2 = "can pay to paypal: thrinai@hotmail.com";
 extern string Desc3 = "Thanks a lot";
+
 extern bool ShowMarketInfo = false;
+
 extern double SlipPage = 1; // Slippage rates
 extern double Lots = 0.1; // Number of lots
 extern double StopLoss = 0;
 extern double TakeProfit = 0;
 extern double MAGIC = 12357951;
+
 extern bool StopLossRecover = true;
 extern bool NotSell = false;
 extern bool NotBuy = false;
@@ -36,6 +39,7 @@ extern bool AutoLots = false;
 extern double MAXLots = 10;
 extern double SymbolsCount = 2;
 extern double Risk = 0.7;
+
 extern int PauseMin  =  0;
 extern int FromHourStop1  =  25;
 extern int ToHourStop1  =  25;
