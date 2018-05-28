@@ -8,18 +8,16 @@
 #property strict
 
 //--- input parameters
-//input int            TakeProfit=50;
-//input int            StopLoss=50;
-//input double         LotSize=0.1;
 input int Risk                = 2;
 input int Day_Volatility_Back = 3;
 input int Slippage            = 3;
 input int MagicNumber         = 7777;
 
+input bool AlwaysRunning   = false;
 input int StartingHour  	=  9;
-input int EndingHour  		=  22;
+input int EndingHour  		=  21;
 input int StartingMinute  	=  30;
-input int endingMinute  	=  30;
+input int EndingMinute  	=  45;
 
 //--- indicator inputs
 sinput string        indi = "";                // ------ Indicators -----  
@@ -36,6 +34,7 @@ int    MySlippage;
 double MyVolatility;
 double VolatilityHight;
 double VolatilityLow;
+string CommentOrder;
 
 //--- indicators
 double RSI;
@@ -50,10 +49,6 @@ int OnInit()
 //---
    MyPoint = MyPoint();
    MySlippage = MySlippage();
-   
-   //TODO: to be removed
-   MyVolatility = MyVolatility();
-   MyLotSize();
 
 //---
    return(INIT_SUCCEEDED);
@@ -71,9 +66,7 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-//---
-   Print("##########OnTick()!!!############");
-	int nbOrders = TotalOpenOrders();
+   int nbOrders = TotalOpenOrders();
 	
 	if(IsTradingTime())
 	{
@@ -100,6 +93,7 @@ void OnTick()
 		   }
 	   }
    }else {
+      Print("##############CLOSE##############");
 	   //close order
 		if(nbOrders > 0) {
 			CloseOrder();
@@ -137,6 +131,7 @@ void InitIndicators()
 // Buy Logic
 bool BuySignal()
 {
+   CommentOrder = "Buy with";
    
    // MACD zero line filter
    if(!(MACD[0] > 0 && MACD[1] > 0))return(false);
@@ -145,7 +140,10 @@ bool BuySignal()
    if(!(MACD[0] > MACD[1]))return(false);
 
 	// Check Signal
-   if(fast_MA[1] > slow_MA[1] && fast_MA[2] < slow_MA[2])return(true);
+   if(fast_MA[1] > slow_MA[1] && fast_MA[2] < slow_MA[2]) {
+      CommentOrder = StringConcatenate (CommentOrder, " MACD Pattern");
+      return(true);
+   }
    
    //TODO: Ajouter RSI ???
    //if(RSI <= RSI_Level && Low[1] >= MA)
@@ -159,6 +157,7 @@ bool BuySignal()
 // Sell Logic
 bool SellSignal()
 {
+   CommentOrder = "Sell with";
 
    // MACD zero line filter
    if(!(MACD[0] < 0 && MACD[1] < 0))return(false);
@@ -167,12 +166,14 @@ bool SellSignal()
    if(!(MACD[0] < MACD[1]))return(false);
 
   // Check Signal
-   if(fast_MA[1] < slow_MA[1] && fast_MA[2] > slow_MA[2])return(true);
+   if(fast_MA[1] < slow_MA[1] && fast_MA[2] > slow_MA[2]) {
+      CommentOrder = StringConcatenate (CommentOrder, " MACD Pattern");
+      return(true);
+   }
    
    //TODO: Ajouter RSI ???
    //if(RSI >= 100-RSI_Level && High[1] <= MA)
    //   return(true);
-
    
    return(false);
 }
@@ -190,13 +191,13 @@ void OpenBuy()
    lotSize = MyLotSize(); 
    if(lotSize == 0) return ;
   
-   int ticket = OrderSend(_Symbol,OP_BUY,lotSize,Ask,MySlippage,0,0,"BUY My EA",MagicNumber, 0, Green);
+   int ticket = OrderSend(_Symbol,OP_BUY,lotSize,Ask,MySlippage,0,0,CommentOrder,MagicNumber, 0, Green);
       
       if(ticket<0)
          PrintError("OrderSend");
                  
    // Modify Buy Order
-   UpdateOrder();
+   //UpdateOrder();
 }
 
 
@@ -207,13 +208,13 @@ void OpenSell()
    double lotSize = MyLotSize();
    if(lotSize == 0) return ;
    
-   int ticket = OrderSend(_Symbol,OP_SELL,lotSize,Bid,MySlippage,0,0,"SELL My EA",MagicNumber, 0, Red);
+   int ticket = OrderSend(_Symbol,OP_SELL,lotSize,Bid,MySlippage,0,0,CommentOrder,MagicNumber, 0, Red);
       
       if(ticket<0)
          PrintError("OrderSend");
                  
    // Modify Sell Order
-   UpdateOrder();
+   //UpdateOrder();
 }
 
 //Update the trailing stop and the take profit
@@ -226,15 +227,15 @@ void UpdateOrder() {
 	
 	//update BUY
 	if(OrderType() == OP_BUY ) {
-		stopLoss = MathMin(Ask - midVolatility, VolatilityLow);
-		takeProfit = MathMax (Ask + midVolatility , VolatilityHight);
+		stopLoss = MathMin( (Ask - midVolatility), VolatilityLow);
+		takeProfit = MathMax ((Ask + midVolatility) , VolatilityHight);
 		
 		res = OrderModify(OrderTicket(),OrderOpenPrice(),Ask-stopLoss, Ask+takeProfit,0, Blue);
 		
 	//update SELL
 	} else {
-		stopLoss = MathMin(Ask - midVolatility, VolatilityHight);
-		takeProfit = MathMax (Ask + midVolatility , VolatilityLow);
+		stopLoss = MathMin( (Bid + midVolatility), VolatilityHight);
+		takeProfit = MathMax ( (Bid - midVolatility) , VolatilityLow);
 		
 		res = OrderModify(OrderTicket(),OrderOpenPrice(),Bid+stopLoss, Bid-takeProfit,0, Purple);
 	}
@@ -280,19 +281,26 @@ int TotalOpenOrders()
 //Checks and update the open Order
 void CheckOpenOrder()
 {   
-	//Only 1 oder can be open.
+	//Only 1 oder can be open, select the order.
     if(OrderMagicNumber() == MagicNumber && OrderSymbol() == _Symbol)
-     {			
-            //check buy trend
-			if( (OrderType() == OP_BUY ) && (Close[0] > Open[0] && Close[0] > Close[1]) )
-			   {
-				  UpdateOrder();
-			   }
-			//check sell trend
-			if( (OrderType() == OP_SELL ) && (Close[0] < Open[0] && Close[0] < Close[1]) )
-			   {
-				  UpdateOrder();
-			   }
+     {
+         
+         //check buy signal still valid
+			if( (OrderType() == OP_BUY ) && SellSignal() )
+			{
+				  CloseOrder();
+				  return;
+			}
+			
+			//check sell signal still valid
+			if( (OrderType() == OP_SELL ) && BuySignal() )
+			{
+				CloseOrder();
+				return;
+			}
+			 
+			//Update if Stop loss not set yet;
+         if(OrderStopLoss() == 0) UpdateOrder();	
      }
 }
 
@@ -347,12 +355,14 @@ bool IsNewBar()
 //Returns true if the current time is in the valid windows time ( eg: 9h30 - 22h30)
 bool IsTradingTime()
 {
+   if(AlwaysRunning) return true;
+   
 	int hour = Hour();
 	int minute = Minute();
 	Print("Hour: ", hour , " Minute: ", minute);
 	
-	if( ((hour > StartingHour) ||  (hour >= StartingHour && minute > StartingMinute) )
-		&& ((hour > StartingHour) ||  (hour >= StartingHour && minute > StartingMinute) ) )
+	if( ((hour > StartingHour) ||  (hour >= StartingHour && minute >= StartingMinute) )
+		&& ((hour < EndingHour) ||  (hour <= EndingHour && minute <= EndingMinute) ) )
 		return true;
 		
 	return false;
@@ -365,12 +375,13 @@ double MyVolatility()
 {
 	bool res = false;
 	double volatility;
-	int shift;
+	int highestBar, lowestBar;
 	
-	shift = iBarShift(NULL, PERIOD_D1, iTime(NULL,PERIOD_D1,Day_Volatility_Back));
+	highestBar = iHighest(NULL,PERIOD_D1,MODE_HIGH,Day_Volatility_Back,0);
+	lowestBar = iLowest(NULL,PERIOD_D1,MODE_LOW,Day_Volatility_Back,0);
 	
-	VolatilityHight = iHigh(NULL, PERIOD_D1, shift);
-	VolatilityLow = iLow(NULL, PERIOD_D1, shift);
+	VolatilityHight = iHigh(NULL, PERIOD_D1, highestBar);
+	VolatilityLow = iLow(NULL, PERIOD_D1, lowestBar);
 	
 	volatility = VolatilityHight - VolatilityLow;
 	
