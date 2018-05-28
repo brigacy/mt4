@@ -140,7 +140,7 @@ bool BuySignal()
    if(!(MACD[0] > MACD[1]))return(false);
 
 	// Check Signal
-   if(fast_MA[1] > slow_MA[1] && fast_MA[2] < slow_MA[2]) {
+   if(CheckBuySignal()) {
       CommentOrder = StringConcatenate (CommentOrder, " MACD Pattern");
       return(true);
    }
@@ -149,10 +149,22 @@ bool BuySignal()
    //if(RSI <= RSI_Level && Low[1] >= MA)
 	//return(true);
 
-
    return(false);
-   
 }
+
+
+//Buy Signal
+bool CheckBuySignal()
+{
+	// Check Signal
+   if(fast_MA[1] > slow_MA[1] && fast_MA[2] < slow_MA[2]) {
+      return(true);
+   }
+   
+   return false;
+
+}
+
 
 // Sell Logic
 bool SellSignal()
@@ -166,7 +178,7 @@ bool SellSignal()
    if(!(MACD[0] < MACD[1]))return(false);
 
   // Check Signal
-   if(fast_MA[1] < slow_MA[1] && fast_MA[2] > slow_MA[2]) {
+   if(CheckSellSignal()) {
       CommentOrder = StringConcatenate (CommentOrder, " MACD Pattern");
       return(true);
    }
@@ -176,6 +188,17 @@ bool SellSignal()
    //   return(true);
    
    return(false);
+}
+
+//Sell Signal
+bool CheckSellSignal() {
+     // Check Signal
+   if(fast_MA[1] < slow_MA[1] && fast_MA[2] > slow_MA[2]) {
+      return(true);
+   }
+   
+   return false;
+
 }
 
 //+------------------------------------------------------------------+
@@ -286,14 +309,14 @@ void CheckOpenOrder()
      {
          
          //check buy signal still valid
-			if( (OrderType() == OP_BUY ) && SellSignal() )
+			if( (OrderType() == OP_BUY ) && CheckSellSignal() )
 			{
 				  CloseOrder();
 				  return;
 			}
 			
 			//check sell signal still valid
-			if( (OrderType() == OP_SELL ) && BuySignal() )
+			if( (OrderType() == OP_SELL ) && CheckBuySignal() )
 			{
 				CloseOrder();
 				return;
