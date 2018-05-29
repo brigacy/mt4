@@ -35,6 +35,7 @@ double MyVolatility;
 double VolatilityHight;
 double VolatilityLow;
 string CommentOrder;
+bool   debug = false;
 
 //--- indicators
 double RSI;
@@ -131,7 +132,7 @@ void InitIndicators()
 // Buy Logic
 bool BuySignal()
 {
-   CommentOrder = "Buy with";
+   CommentOrder = "";
    
    // MACD zero line filter
    if(!(MACD[0] > 0 && MACD[1] > 0))return(false);
@@ -140,8 +141,8 @@ bool BuySignal()
    if(!(MACD[0] > MACD[1]))return(false);
 
 	// Check Signal
-   if(CheckBuySignal()) {
-      CommentOrder = StringConcatenate (CommentOrder, " MACD Pattern");
+   if(BuyCrossMA()) {
+      CommentOrder = StringConcatenate (CommentOrder, "CrossMA;");
       return(true);
    }
    
@@ -154,7 +155,7 @@ bool BuySignal()
 
 
 //Buy Signal
-bool CheckBuySignal()
+bool BuyCrossMA()
 {
 	// Check Signal
    if(fast_MA[1] > slow_MA[1] && fast_MA[2] < slow_MA[2]) {
@@ -164,12 +165,18 @@ bool CheckBuySignal()
    return false;
 
 }
-
+//Close a Buy Order open with Cross MA
+bool CloseBuyCrossMA()
+{
+	if(fast_MA[1] < slow_MA[1] )
+		return true;
+	return false;
+}
 
 // Sell Logic
 bool SellSignal()
 {
-   CommentOrder = "Sell with";
+   CommentOrder = "";
 
    // MACD zero line filter
    if(!(MACD[0] < 0 && MACD[1] < 0))return(false);
@@ -178,8 +185,8 @@ bool SellSignal()
    if(!(MACD[0] < MACD[1]))return(false);
 
   // Check Signal
-   if(CheckSellSignal()) {
-      CommentOrder = StringConcatenate (CommentOrder, " MACD Pattern");
+   if(SellCrossMA()) {
+      CommentOrder = StringConcatenate (CommentOrder, "CrossMA;");
       return(true);
    }
    
@@ -191,7 +198,7 @@ bool SellSignal()
 }
 
 //Sell Signal
-bool CheckSellSignal() {
+bool SellCrossMA() {
      // Check Signal
    if(fast_MA[1] < slow_MA[1] && fast_MA[2] > slow_MA[2]) {
       return(true);
@@ -200,6 +207,15 @@ bool CheckSellSignal() {
    return false;
 
 }
+
+//Close a Sell Order open with Cross MA
+bool CloseSellCrossMA()
+{
+	if(fast_MA[1] > slow_MA[1] )
+		return true;
+	return false;
+}
+
 
 //+------------------------------------------------------------------+
 //| ORDER OPERATION                                                 |
@@ -253,14 +269,14 @@ void UpdateOrder() {
 		stopLoss = MathMin( (Ask - midVolatility), VolatilityLow);
 		takeProfit = MathMax ((Ask + midVolatility) , VolatilityHight);
 		
-		res = OrderModify(OrderTicket(),OrderOpenPrice(),Ask-stopLoss, Ask+takeProfit,0, Blue);
+		res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Blue);
 		
 	//update SELL
 	} else {
 		stopLoss = MathMin( (Bid + midVolatility), VolatilityHight);
 		takeProfit = MathMax ( (Bid - midVolatility) , VolatilityLow);
 		
-		res = OrderModify(OrderTicket(),OrderOpenPrice(),Bid+stopLoss, Bid-takeProfit,0, Purple);
+		res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Purple);
 	}
 	
 	if(!res) PrintError("OrderModify");
@@ -304,23 +320,50 @@ int TotalOpenOrders()
 //Checks and update the open Order
 void CheckOpenOrder()
 {   
+	string lstPattern;
+	string pattern[];
+	int nbPattern;
+	bool toClose = false;
+	string message = "";
+		 
 	//Only 1 oder can be open, select the order.
     if(OrderMagicNumber() == MagicNumber && OrderSymbol() == _Symbol)
      {
+		 lstPattern = OrderComment();
+		 nbPattern = StringSplit(pattern,";",result);
+		 
+		 if( (pattern = "") || (nbPattern == 0) ) {
+			 PrintError("Order close without Pattern!!")
+			 CloseOrder();
+		 }
          
          //check buy signal still valid
-			if( (OrderType() == OP_BUY ) && CheckSellSignal() )
+			if(OrderType() == OP_BUY )
 			{
-				  CloseOrder();
-				  return;
+				for(int i=0 ; i<nbPattern ; i++) {
+					if( (pattern[i] == "CrossMA") && CloseBuyCrossMA() ) {
+						toClose = true;
+						message = StringConcatenate(message,"Close Cross MA;");
+					}
+				}
+				  
+				return;
 			}
 			
 			//check sell signal still valid
-			if( (OrderType() == OP_SELL ) && CheckBuySignal() )
+			if(OrderType() == OP_SELL )
 			{
-				CloseOrder();
-				return;
+				if( (pattern[i] == "CrossMA") && CloseSellCrossMA() ) {
+						toClose = true;
+						message = StringConcatenate(message,"Close Cross MA;");
+				}
 			}
+			 
+			 if (toClose) {
+				PrintNotification(message); 
+				CloseOrder();
+				return; 
+			 }
 			 
 			//Update if Stop loss not set yet;
          if(OrderStopLoss() == 0) UpdateOrder();	
@@ -382,7 +425,6 @@ bool IsTradingTime()
    
 	int hour = Hour();
 	int minute = Minute();
-	Print("Hour: ", hour , " Minute: ", minute);
 	
 	if( ((hour > StartingHour) ||  (hour >= StartingHour && minute >= StartingMinute) )
 		&& ((hour < EndingHour) ||  (hour <= EndingHour && minute <= EndingMinute) ) )
@@ -407,8 +449,6 @@ double MyVolatility()
 	VolatilityLow = iLow(NULL, PERIOD_D1, lowestBar);
 	
 	volatility = VolatilityHight - VolatilityLow;
-	
-	Print("VolatilityHight : ", VolatilityHight, " | VolatilityLow : " , VolatilityLow, " | MyVolatility : ", volatility);
 	
 	return volatility;
 }
@@ -435,18 +475,21 @@ double MyLotSize()
    //the money committed must be higher than Volatility committed
    if(committed <  volatility  ) lotMM = 0;
    
-  Print("OneLotMargin :", oneLotMargin);
-  Print("FreeMargin :", freeMargin);
-  Print("lotMM :", lotMM);
-  Print("LotStep :", lotStep);
-  Print("lotMM :", lotMM);
-  Print("leverage :", leverage);
-  Print("committed :", committed);
-  Print("volatility :", volatility);
+   if(debug) {
+	  Print("OneLotMargin :", oneLotMargin);
+	  Print("FreeMargin :", freeMargin);
+	  Print("lotMM :", lotMM);
+	  Print("LotStep :", lotStep);
+	  Print("lotMM :", lotMM);
+	  Print("leverage :", leverage);
+	  Print("committed :", committed);
+	  Print("volatility :", volatility);
+  }
   
    return lotMM;
 }
 
+//Print Error and Send notification
 void PrintError (string fct) 
 {
    string message;
@@ -455,5 +498,12 @@ void PrintError (string fct)
 		 Print(message);
 		 if(!SendNotification(message)) 
 		   Print("Error in SendNotification. Error code=#" ,GetLastError());   
-      else Print("Order closed successfully.");
+      else Print(fct," done successfully.");
+}
+
+//Print Notification and send notification
+void PrintNotification (string message) {
+	Print(message);
+	if(!SendNotification(message)) 
+		Print("Error in SendNotification. Error code=#" ,GetLastError());
 }
