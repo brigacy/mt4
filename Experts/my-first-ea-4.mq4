@@ -24,9 +24,10 @@ sinput string        indi = "";                // ------ Indicators -----
 //input int            RSI_Period = 14;          // RSI Period
 //input int            RSI_Level  = 30;          // Above RSI Level
 //input int            MA_Period  = 20;          // MA Period
-input ENUM_TIMEFRAMES   MA_Timeframe  = PERIOD_H1;
+input ENUM_TIMEFRAMES   TRADING_Timeframe  = PERIOD_H1;
 input int               MA_Period_Fast  = 5;     // MA Period Fast
 input int               MA_Period_Slow  = 20;     // MA Period Slow
+input int				ATR_Averiaging_Period = 20;
 input ENUM_TIMEFRAMES   Filter_MACD_Timeframe = PERIOD_D1;
 //input ENUM_MA_METHOD MA_Method  = MODE_SMA;    // MA Method
 
@@ -38,10 +39,10 @@ double VolatilityHight;
 double VolatilityLow;
 string CommentOrder;
 bool   debug = false;
+int    R1_Multiple; 
 
 //--- indicators
-double RSI;
-double MA;
+double MA, RSI, ATR;
 double MACD[2],fast_MA[3],slow_MA[3];
 
 //+------------------------------------------------------------------+
@@ -115,6 +116,9 @@ void InitIndicators()
    
    // Moving Average
    //MA = iMA(_Symbol,PERIOD_H1,MA_Period,0,MODE_SMA,PRICE_CLOSE,1);
+   
+   // ATR
+   ATR = iATR(_Symbol,TRADING_Timeframe,ATR_Averiaging_Period,1);
       
    for(int i=0;i<2;i++)
      {
@@ -122,10 +126,10 @@ void InitIndicators()
       MACD[i]=iMACD(_Symbol,Filter_MACD_Timeframe,12,26,9,PRICE_CLOSE,i,0);
 
       // Fast MA -- current period
-      fast_MA[i+1]=iMA(_Symbol,MA_Timeframe,MA_Period_Fast,0,MODE_EMA,PRICE_CLOSE,1+i);
+      fast_MA[i+1]=iMA(_Symbol,TRADING_Timeframe,MA_Period_Fast,0,MODE_EMA,PRICE_CLOSE,1+i);
 
       // Slow MA -- current period
-      slow_MA[i+1]=iMA(_Symbol,MA_Timeframe,MA_Period_Slow,0,MODE_EMA,PRICE_CLOSE,1+i);
+      slow_MA[i+1]=iMA(_Symbol,TRADING_Timeframe,MA_Period_Slow,0,MODE_EMA,PRICE_CLOSE,1+i);
      }
    
 }
@@ -227,19 +231,17 @@ bool CloseSellCrossMA()
 // Open Buy Order
 void OpenBuy()
 {
-   
    double lotSize;
    
    lotSize = MyLotSize(); 
    if(lotSize == 0) return ;
-  
+   
+   CommentOrder = StringConcatenate (MyVolatility, CommentOrder);
+   R1_Multiple = 0;
    int ticket = OrderSend(_Symbol,OP_BUY,lotSize,Ask,MySlippage,0,0,CommentOrder,MagicNumber, 0, Green);
       
       if(ticket<0)
          PrintError("OrderSend");
-                 
-   // Modify Buy Order
-   //UpdateOrder();
 }
 
 
@@ -250,44 +252,81 @@ void OpenSell()
    double lotSize = MyLotSize();
    if(lotSize == 0) return ;
    
+   CommentOrder = StringConcatenate (MyVolatility, CommentOrder);
+   R1_Multiple = 0;
    int ticket = OrderSend(_Symbol,OP_SELL,lotSize,Bid,MySlippage,0,0,CommentOrder,MagicNumber, 0, Red);
       
       if(ticket<0)
          PrintError("OrderSend");
-                 
-   // Modify Sell Order
-   //UpdateOrder();
 }
 
-//Update the trailing stop and the take profit
+//Update the trailing stop and the take profit if there where no stoploss yet define
+/*
 void UpdateOrder() {
 	
 	bool res = false;
-	double stopLoss, takeProfit, midVolatility;
+	double stopLoss, takeProfit, volatility;
 	
-	midVolatility = MyVolatility/2;
+	volatility = MyVolatility();
 	
 	//update BUY
 	if(OrderType() == OP_BUY ) {
-		stopLoss = MathMin( (Ask - midVolatility), VolatilityLow);
-		takeProfit = MathMax ((Ask + (3 * midVolatility)) , VolatilityHight);
+		stopLoss = MathMin( (Ask - (volatility/2)), VolatilityLow);
+		if(OrderStopLoss() > 0) {
+			takeProfit = OrderTakeProfit();
+		} else {
+			takeProfit = MathMax ((Ask + (volatility)) , VolatilityHight);
+		}
 		
 		res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Blue);
 		
 	//update SELL
 	} else {
-		stopLoss = MathMin( (Bid + midVolatility), VolatilityHight);
-		takeProfit = MathMax ( (Bid - (3 * midVolatility)) , VolatilityLow);
-		
+		stopLoss = MathMax( (Bid + (volatility/2)), VolatilityHight);
+		if(OrderStopLoss() > 0) {
+			takeProfit = OrderTakeProfit();
+		} else {
+			takeProfit = MathMax ( (Bid - volatility) , VolatilityLow);
+		}
+
 		res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Purple);
 	}
 	
 	if(!res) PrintError("OrderModify");
 		 
 }
+*/
+
+//Update the origin order with stoploss and the take profit
+void UpdateOriginOrder(string pattern[]) {
+	
+	bool res = false;
+	double stopLoss, takeProfit;
+	
+	double volatilityOrder = (double) pattern[0];
+
+	//update BUY
+	if(OrderType() == OP_BUY ) {
+		stopLoss = Ask - (volatilityOrder/2)
+		takeProfit = Ask + (volatilityOrder);
+		
+		res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Blue);
+	}
+		
+	//update SELL
+	} else {
+		stopLoss = Bid + (volatilityOrder/2);
+		takeProfit = Bid - volatilityOrder;
+		
+		res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Purple);
+	}
+	
+	if(!res) PrintError("UpdateOriginOrder");
+		 
+}
+
 
 // Close Sell Order
-//TODO: only 1 for the moment
 void CloseOrder()
 {
 	bool res;
@@ -333,48 +372,116 @@ void CheckOpenOrder()
 	//Only 1 oder can be open, select the order.
     if(OrderMagicNumber() == MagicNumber && OrderSymbol() == _Symbol)
     {
-		 lstPattern = OrderComment();
-		 u_sep=StringGetCharacter(";",0);
-		 nbPattern = StringSplit(lstPattern,u_sep,pattern);
-		 
-		 if( (lstPattern == "") || (nbPattern == 0) ) {
+		lstPattern = OrderComment();
+		u_sep=StringGetCharacter(";",0);
+		nbPattern = StringSplit(lstPattern,u_sep,pattern);
+		
+		if( (lstPattern == "") || (!nbPattern > 1) ) {
 			 PrintError("Order close without Pattern!!");
 			 CloseOrder();
-		 }
-         
+		}
+        
          //check buy signal still valid
-			if(OrderType() == OP_BUY )
-			{
-			   for(int i=0 ; i<nbPattern-1 ; i++) {
-					if( (StringCompare(pattern[i],"CrossMA") == 0) && CloseBuyCrossMA() ) {
-						toClose = true;
-						message = StringConcatenate(message,"Close Cross MA;");
-					}
-				}
-			}
-			
-			//check sell signal still valid
-			if(OrderType() == OP_SELL )
-			{
-			   for(int i=0 ; i<nbPattern-1 ; i++) {
-   				if( (StringCompare(pattern[i],"CrossMA") == 0) && CloseSellCrossMA() ) {
-   						toClose = true;
-   						message = StringConcatenate(message,"Close Cross MA;");
-   				}
-   			}	
-			}
+		if(OrderType() == OP_BUY )
+		{
+			message = CheckOpenOrderBuy(nbPattern , pattern);
+		}
+		
+		//check sell signal still valid
+		if(OrderType() == OP_SELL )
+		{
+			message = CheckOpenOrderSell(nbPattern , pattern);	
+		}
+		
+		if (StringLen(message) > 0) {
+			PrintNotification(message); 
+			CloseOrder();
+			return; 
+		}
 			 
-			if (toClose) {
-				PrintNotification(message); 
-				CloseOrder();
-				return; 
-			}
-			 
-			//Update if Stop loss not set yet;
-         if(OrderStopLoss() == 0) UpdateOrder();	
-     }
+		//Update if Stop loss not set yet;
+        if(OrderStopLoss() == 0) UpdateOriginOrder(pattern);
+		else {
+			UpdateOrder(pattern);
+		}
+    }
 }
 
+//Check to close buy order
+string CheckOpenOrderBuy(int nbPattern, string pattern[]) {
+	string message = "";
+	for(int i=0 ; i<nbPattern-1 ; i++) {
+		if( (StringCompare(pattern[i],"CrossMA") == 0) && CloseBuyCrossMA() ) {
+			toClose = true;
+			message = StringConcatenate(message,"Close Cross MA;");
+		}
+	}
+	return message;
+}
+
+//Check to close sell order
+string CheckOpenOrderSell(int nbPattern, string pattern[]) {
+	string message = "";
+	for(int i=0 ; i<nbPattern-1 ; i++) {
+		if( (StringCompare(pattern[i],"CrossMA") == 0) && CloseSellCrossMA() ) {
+				toClose = true;
+				message = StringConcatenate(message,"Close Cross MA;");
+		}
+	}
+	return message;
+}
+
+// Update trailing stop and take profit if the R1 multiple is passed
+void UpdateOrder(string pattern[] ) {
+	bool res;
+	int r_m;
+	double pipsWon;
+	double volatilityOrder = (double) pattern[0];
+	
+	
+	if(OrderType() == OP_BUY )
+	{
+		pipsWon = Ask - OrderOpenPrice();
+		
+		r_m = MathCeil(pipsWon / (volatilityOrder/2));
+		
+		Print("#### r_m=",r_m);
+		Print("#### pipsWon=",pipsWon);
+		Print("#### volatilityOrder/2=",(volatilityOrder/2));
+		Print("#### r1_Multiple=",r1_Multiple);
+		if(r_m > R1_Multiple) {
+			//update R1 Multiple
+			
+			stopLoss = OrderOpenPrice() + (volatilityOrder/2) * R1_Multiple;
+			takeProfit = OrderOpenPrice() + (volatilityOrder) * r_m;
+		
+			res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Blue);
+			R1_Multiple = r_m;
+		}
+	}
+	
+	//check sell signal still valid
+	if(OrderType() == OP_SELL )
+	{
+		pipsWon = OrderOpenPrice() - Bid;
+		r_m = MathCeil(pipsWon / (volatilityOrder/2));
+		Print("#### r_m=",r_m);
+		Print("#### pipsWon=",pipsWon);
+		Print("#### volatilityOrder/2=",(volatilityOrder/2));
+		Print("#### r1_Multiple=",r1_Multiple);
+		if(r_m > R1_Multiple) {
+			//update R1 Multiple
+			
+			stopLoss = OrderOpenPrice() - (volatilityOrder/2) * R1_Multiple;
+			takeProfit = OrderOpenPrice() - (volatilityOrder) * r_m;
+		
+			res = OrderModify(OrderTicket(),OrderOpenPrice(),stopLoss, takeProfit,0, Purple);
+			R1_Multiple = r_m;
+		}
+	}
+	
+	if(!res) PrintError("UpdateOriginOrder");
+}
 
 //+------------------------------------------------------------------+
 //| Custom functions                                                 |
@@ -443,7 +550,6 @@ bool IsTradingTime()
 //Update the volatility based the last days
 double MyVolatility()
 {
-	bool res = false;
 	double volatility;
 	int highestBar, lowestBar;
 	
@@ -474,8 +580,8 @@ double MyLotSize()
   lotMM = NormalizeDouble(lotMM/lotStep,0) * lotStep;
   
   
-   committed = lotMM * oneLotMargin;
-   volatility = MyVolatility/2 * oneLotMargin * leverage;
+  committed = lotMM * oneLotMargin;
+  volatility = MyVolatility/2 * oneLotMargin * leverage;
    
    //the money committed must be higher than Volatility committed
    if(committed <  volatility  ) lotMM = 0;
@@ -489,6 +595,8 @@ double MyLotSize()
 	  Print("leverage :", leverage);
 	  Print("committed :", committed);
 	  Print("volatility :", volatility);
+	  Print("MyVolatility:", MyVolatility);
+	  Print("ATR= ", ATR);
   }
   
    return lotMM;
